@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://esm.sh; connect-src https://aewatvipmggdymyjhwkx.supabase.co https://esm.sh; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>G Count · OAuth check</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#14120f;color:#eee9df}
+body{margin:0;padding:24px}main{max-width:540px;margin:6vh auto;border:1px solid #75603d;border-radius:20px;background:#201d19;padding:25px}
+h1{color:#dbb96c;font-size:24px}p{line-height:1.5;color:#c7c0b5}label{display:block}
+input{width:100%;box-sizing:border-box;margin:8px 0 14px;padding:12px;background:#15130f;border:1px solid #5d5343;color:white;border-radius:10px}
+button{border:0;border-radius:10px;padding:12px;background:#d6b468;color:#17130e;font-weight:700;margin:5px;cursor:pointer}
+button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:15px;border-radius:12px;background:#15130f}
+</style>
+</head>
+<body><main><h1>G Count · OAuth check</h1>
+<p>Test temporaire indépendant de Lovable, connecté uniquement à <strong>gcount-prod</strong>. Vérifier que les nouvelles inscriptions sont désactivées sur ce projet avant tout essai.</p>
+<label for="key">Clé Supabase <strong>publishable / anon uniquement</strong></label>
+<input id="key" type="password" autocomplete="off" spellcheck="false">
+<button id="setup">Initialiser</button>
+<p><small>Ne jamais renseigner de clé secrète ou service_role. Seule une clé publique est acceptée. Les sessions restent dans cet onglet (sessionStorage).</small></p>
+<button id="google" disabled>Google</button><button id="apple" disabled>Apple</button><button id="inspect" disabled>Vérifier UUID</button><button id="logout" disabled>Déconnexion</button>
+<pre id="status" role="status">En attente.</pre>
+<p><small>Le seul critère de succès est la reconnexion au même UUID Auth préexistant. Un UUID différent nécessite d'arrêter le test.</small></p>
+</main>
+<script type="module">
+import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.105.4';
+const url='https://aewatvipmggdymyjhwkx.supabase.co';
+const status=document.getElementById('status');
+const say=(message)=>{status.textContent=message;};
+let client;
+const actions=['google','apple','inspect','logout'];
+async function initialize(key){
+ if(!key || (!key.startsWith('sb_publishable_')&&!key.startsWith('eyJ'))){say('Clé publique Supabase invalide.');return;}
+ client=createClient(url,key,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:sessionStorage,storageKey:'gcount-temporary-oauth-check'}});
+ actions.forEach(id=>document.getElementById(id).disabled=false);
+ say('Prêt. Sélectionne Google ou Apple pour tester.');
+ const {data,error}=await client.auth.getUser();
+ if(data?.user){display(data.user);}
+ else if(error && location.search){say('Retour OAuth : '+error.message);}
+}
+function display(user){
+ const providers=user.app_metadata?.providers||[];
+ say('Session vérifiée.\nUUID Auth : '+user.id+'\nProviders : '+providers.join(', ')+'\n\nCompare cet UUID avec celui du compte existant dans Supabase. Si différent : STOP.');
+}
+document.getElementById('setup').onclick=()=>{
+ const key=document.getElementById('key').value.trim();
+ if(key.startsWith('sb_secret_')||key.toLowerCase().includes('service_role')){say('Clé secrète refusée.');return;}
+ sessionStorage.setItem('gcount-oauth-check-public-key',key);
+ initialize(key).catch(e=>say('Erreur : '+e.message));
+};
+const previousKey=sessionStorage.getItem('gcount-oauth-check-public-key');
+if(previousKey)initialize(previousKey).catch(e=>say('Erreur : '+e.message));
+for(const provider of ['google','apple']){
+ document.getElementById(provider).onclick=async()=>{
+  if(!client)return;
+  const {error}=await client.auth.signInWithOAuth({provider,options:{redirectTo:location.origin+location.pathname}});
+  if(error)say(error.message);
+ };
+}
+document.getElementById('inspect').onclick=async()=>{
+ const {data,error}=await client.auth.getUser();
+ if(data?.user)display(data.user);else say(error?.message||'Pas de session.');
+};
+document.getElementById('logout').onclick=async()=>{
+ if(!client)return;
+ const {error}=await client.auth.signOut();
+ say(error?.message||'Déconnecté.');
+};
+</script></body></html>

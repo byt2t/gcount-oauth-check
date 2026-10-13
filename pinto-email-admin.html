@@ -40,7 +40,7 @@ import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.105.4';
 const project='https://aewatvipmggdymyjhwkx.supabase.co';
 const publicKey='sb_publishable_ycmvyUJ4Bd2I0bDKNnQOEw_aBesbiE6';
 const owner='23bf9e8e-9c69-4dbd-8ac3-698e067237ef';
-const root='https://byt2t.github.io/gcount-oauth-check/';
+const callback='https://byt2t.github.io/gcount-oauth-check/pinto-email-admin.html';
 const functionUrl=project+'/functions/v1/one-time-pinto-email-recovery';
 const status=document.getElementById('status');
 const say=(s)=>{status.textContent=s;};
@@ -50,7 +50,7 @@ const supabase=createClient(project,publicKey,{auth:{flowType:'pkce',detectSessi
 async function inspect(){
  const {data,error}=await supabase.auth.getUser();
  if(error||!data?.user){
-  say('Connexion administrateur nécessaire. Clique sur « Me connecter avec Apple », puis reviens sur cette page après le retour OAuth.');
+  say('Connexion administrateur nécessaire. Clique sur « Me connecter avec Apple » : Apple doit te ramener automatiquement sur cette page.');
   return;
  }
  if(data.user.id!==owner){
@@ -63,7 +63,7 @@ async function inspect(){
 }
 connect.onclick=async()=>{
  sessionStorage.setItem('gcount-oauth-check-public-key',publicKey);
- const {error}=await supabase.auth.signInWithOAuth({provider:'apple',options:{redirectTo:root}});
+ const {error}=await supabase.auth.signInWithOAuth({provider:'apple',options:{redirectTo:callback}});
  if(error)say('Connexion Apple impossible : '+error.message);
 };
 apply.onclick=async()=>{

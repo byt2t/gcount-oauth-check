@@ -14,7 +14,20 @@ button{border:0;border-radius:10px;padding:12px;background:#d6b468;color:#17130e
 button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:15px;border-radius:12px;background:#15130f}
 </style>
 </head>
-<body><main><h1>G Count · OAuth check</h1>
+<body><main>
+<section id="recoveryPanel" hidden>
+  <p style="letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:#d6b468;font-weight:700">G COUNT · ACCÈS TEMPORAIRE</p>
+  <h1>Retrouve ta place au comptoir.</h1>
+  <p>On vérifie ton accès au compte existant, sans créer de nouveau profil.</p>
+  <form id="recoveryForm">
+    <label for="recoveryEmail">L’adresse email associée à ton compte G Count</label>
+    <input id="recoveryEmail" type="email" autocomplete="email" required maxlength="254" placeholder="tonadresse@exemple.fr">
+    <button id="recoverySend" type="submit">Recevoir mon lien sécurisé</button>
+  </form>
+  <pre id="recoveryStatus" role="status" aria-live="polite">Prêt pour le test.</pre>
+  <p><small>Test réservé aux membres accompagnés. Aucun mot de passe nécessaire. Ne lance pas de connexion Apple avant validation par l’administrateur.</small></p>
+</section>
+<h1>G Count · OAuth check</h1>
 <p>Test temporaire indépendant de Lovable, connecté uniquement à <strong>gcount-prod</strong>. Vérifier que les nouvelles inscriptions sont désactivées sur ce projet avant tout essai.</p>
 <label for="key">Clé Supabase <strong>publishable / anon uniquement</strong></label>
 <input id="key" type="password" autocomplete="off" spellcheck="false">
@@ -38,6 +51,46 @@ button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padd
 <script type="module">
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.105.4';
 const url='https://aewatvipmggdymyjhwkx.supabase.co';
+const pilotKey='sb_publishable_ycmvyUJ4Bd2I0bDKNnQOEw_aBesbiE6';
+const pilotMarker='gcount-recovery-pilot-pending';
+const recoveryMode=new URLSearchParams(location.search).has('recover') || !!localStorage.getItem(pilotMarker);
+if(recoveryMode){
+ document.querySelectorAll('main > :not(#recoveryPanel)').forEach(node=>node.hidden=true);
+ document.getElementById('recoveryPanel').hidden=false;
+}
+async function bootRecovery(){
+ const sayRecovery=(text)=>{document.getElementById('recoveryStatus').textContent=text;};
+ const pilot=createClient(url,pilotKey,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:localStorage,storageKey:'gcount-recovery-pilot-session'}});
+ const marker=localStorage.getItem(pilotMarker);
+ if(marker){
+  let info;try{info=JSON.parse(marker);}catch{localStorage.removeItem(pilotMarker);sayRecovery('Erreur de vérification. Contacte l’administrateur.');return;}
+  if(Date.now()-info.when>60*60*1000){localStorage.removeItem(pilotMarker);sayRecovery('Ce test a expiré. Demande de l’aide à l’administrateur.');return;}
+  const {data,error}=await pilot.auth.getUser();
+  if(error||!data?.user){sayRecovery('Lien non validé ou session introuvable. STOP. Préviens l’administrateur.');return;}
+  if((data.user.email||'').toLowerCase()!==info.email){sayRecovery('Compte différent : vérification interrompue. STOP.');return;}
+  localStorage.removeItem(pilotMarker);
+  document.getElementById('recoveryForm').hidden=true;
+  sayRecovery('ACCÈS CONFIRMÉ SUR SUPABASE.\\nLa session email existe. Attends la validation de ton ancien compte par l’administrateur avant de reconnecter Apple.');
+  return;
+ }
+ document.getElementById('recoveryForm').onsubmit=async(e)=>{
+  e.preventDefault();
+  const input=document.getElementById('recoveryEmail');
+  const email=input.value.trim().toLowerCase();
+  if(!input.checkValidity()||!email){sayRecovery('Saisis une adresse email valide.');return;}
+  if(!window.confirm('Envoyer un seul lien sécurisé à '+email+' ?\\nAucun nouveau compte ne sera créé.'))return;
+  const send=document.getElementById('recoverySend');
+  send.disabled=true;
+  sayRecovery('Demande de lien en cours…');
+  const {error}=await pilot.auth.signInWithOtp({email,options:{shouldCreateUser:false,emailRedirectTo:location.origin+location.pathname}});
+  if(error){sayRecovery('Lien non envoyé : '+error.message+'\\nPréviens l’administrateur et n’essaie pas une autre adresse.');return;}
+  localStorage.setItem(pilotMarker,JSON.stringify({email,when:Date.now()}));
+  document.getElementById('recoveryForm').hidden=true;
+  sayRecovery('Demande acceptée. Vérifie ta boîte mail et les indésirables.\\nOuvre le lien dans le MÊME navigateur, sur le MÊME appareil.\\nSi aucun message n’arrive, préviens l’administrateur.');
+ };
+ sayRecovery('Prêt pour le test. Utilise uniquement l’adresse déjà associée à ton compte.');
+}
+if(recoveryMode)bootRecovery().catch(()=>{document.getElementById('recoveryStatus').textContent='Une erreur est survenue. Préviens l’administrateur.';});
 const status=document.getElementById('status');
 const say=(message)=>{status.textContent=message;};
 let client;
@@ -100,7 +153,7 @@ document.getElementById('setup').onclick=()=>{
  initialize(key).catch(e=>say('Erreur : '+e.message));
 };
 const previousKey=sessionStorage.getItem('gcount-oauth-check-public-key');
-if(previousKey)initialize(previousKey).catch(e=>say('Erreur : '+e.message));
+if(previousKey&&!recoveryMode)initialize(previousKey).catch(e=>say('Erreur : '+e.message));
 for(const provider of ['google','apple']){
  document.getElementById(provider).onclick=async()=>{
   if(!client)return;

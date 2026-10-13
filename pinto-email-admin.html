@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://esm.sh; connect-src https://aewatvipmggdymyjhwkx.supabase.co https://esm.sh; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex,nofollow">
+<title>G Count · Intervention Auth</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#14120f;color:#eee9df}
+body{margin:0;padding:18px}
+main{max-width:540px;margin:5vh auto;border:1px solid #75603d;border-radius:20px;background:#201d19;padding:25px}
+h1{font-size:26px;color:#dbb96c;margin:16px 0}
+p{color:#c7c0b5;line-height:1.6}
+small{color:#a49a8c}
+b{color:#f0d89d}
+button{display:block;border:0;border-radius:10px;padding:13px 17px;background:#d6b468;color:#17130e;font-weight:700;margin:14px 0;cursor:pointer}
+button:disabled{opacity:.4;cursor:not-allowed}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border-radius:12px;background:#15130f;color:#eee9df;line-height:1.45}
+a{color:#d6b468}
+</style>
+</head>
+<body><main>
+<p style="letter-spacing:.15em;font-size:11px;font-weight:700;color:#d6b468">G COUNT · ADMINISTRATION SÉCURISÉE</p>
+<h1>Récupération du compte Pinto</h1>
+<p>Intervention ponctuelle sur <b>gcount-prod uniquement</b>. La production Lovable et le site de récupération des membres restent inchangés.</p>
+<p>Changer uniquement l'email de connexion du <b>compte Apple historique</b> pour un alias Gmail vérifié. Aucun compte créé, aucune pinte déplacée.</p>
+<pre id="details">Compte cible : Pinto (Apple)
+Email actuel : adresse privée Apple
+Email proposé : jonathanpinto20+gcount@gmail.com
+Compte Google distinct : non modifié</pre>
+<p><small>Action réservée au compte admin G Count authentifié avec Apple. Cette modification utilise l'API Admin officielle Supabase côté serveur.</small></p>
+<button id="connect">Me connecter avec Apple (admin)</button>
+<button id="apply" disabled>Confirmer le changement d'email</button>
+<pre id="status" role="status" aria-live="polite">Vérification de la session admin…</pre>
+<a href="https://byt2t.github.io/gcount-oauth-check/">Retour au laboratoire OAuth</a>
+</main>
+<script type="module">
+import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.105.4';
+const project='https://aewatvipmggdymyjhwkx.supabase.co';
+const publicKey='sb_publishable_ycmvyUJ4Bd2I0bDKNnQOEw_aBesbiE6';
+const owner='23bf9e8e-9c69-4dbd-8ac3-698e067237ef';
+const root='https://byt2t.github.io/gcount-oauth-check/';
+const functionUrl=project+'/functions/v1/one-time-pinto-email-recovery';
+const status=document.getElementById('status');
+const say=(s)=>{status.textContent=s;};
+const connect=document.getElementById('connect');
+const apply=document.getElementById('apply');
+const supabase=createClient(project,publicKey,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:sessionStorage,storageKey:'gcount-temporary-oauth-check'}});
+async function inspect(){
+ const {data,error}=await supabase.auth.getUser();
+ if(error||!data?.user){
+  say('Connexion administrateur nécessaire. Clique sur « Me connecter avec Apple », puis reviens sur cette page après le retour OAuth.');
+  return;
+ }
+ if(data.user.id!==owner){
+  say('Session non-admin détectée. STOP. Connecte-toi avec le compte Apple administrateur G Count, pas avec ton compte Google modérateur.');
+  return;
+ }
+ apply.disabled=false;
+ connect.disabled=true;
+ say('Session du compte administrateur reconnue. Le serveur vérifiera à nouveau ton identité et ton rôle avant tout changement.');
+}
+connect.onclick=async()=>{
+ sessionStorage.setItem('gcount-oauth-check-public-key',publicKey);
+ const {error}=await supabase.auth.signInWithOAuth({provider:'apple',options:{redirectTo:root}});
+ if(error)say('Connexion Apple impossible : '+error.message);
+};
+apply.onclick=async()=>{
+ if(!window.confirm('Intervention sur gcount-prod UNIQUEMENT.\nModifier l’adresse du compte Apple historique Pinto vers l’alias Gmail vérifié ?\nLe compte Google séparé et les données restent intacts.'))return;
+ apply.disabled=true;
+ say('Vérification sécurisée en cours…');
+ const {data,error}=await supabase.auth.getSession();
+ if(error||!data?.session?.access_token){say('Session expirée. Aucun changement effectué.');return;}
+ try{
+  const response=await fetch(functionUrl,{method:'POST',headers:{
+   'Authorization':'Bearer '+data.session.access_token,
+   'apikey':publicKey,'Content-Type':'application/json'
+  },body:'{}'});
+  const payload=await response.json();
+  if(response.ok&&['updated','already_updated'].includes(payload.code)){
+   say('VALIDÉ PAR SUPABASE\n'+payload.message+'\n\nNe recommence pas. Fais maintenant suivre à Pinto le parcours de récupération habituel avec son alias Gmail.');
+  }else{
+   say('ARRÊT : '+(payload.message||'Modification non confirmée.')+'\nCode : '+(payload.code||response.status)+'\nNe réessaie pas avant vérification.');
+  }
+ }catch{
+  say('Réponse du serveur indisponible. Le résultat est INCERTAIN. Ne clique pas à nouveau ; faire vérifier dans Supabase.');
+ }
+};
+inspect().catch(()=>say('Impossible de vérifier la session. Aucun changement effectué.'));
+</script></body></html>

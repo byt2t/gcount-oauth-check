@@ -48,7 +48,7 @@ async function initialize(key){
  if(callbackError){
   const desc=query.get('error_description')||hash.get('error_description')||'Échec du retour OAuth.';
   sessionStorage.removeItem('gcount-apple-link-pending');
-  say('ÉCHEC OAuth Apple : '+callbackError+'\\n'+desc+'\\nAucun succès de rattachement confirmé. STOP.');
+  say('ÉCHEC OAuth Apple : '+callbackError+'\n'+desc+'\nAucun succès de rattachement confirmé. STOP.');
   history.replaceState(null,'',location.pathname);
   return;
  }
@@ -65,8 +65,8 @@ async function initialize(key){
   const after=ids.identities.filter(i=>i.provider==='apple').map(i=>i.id);
   const delta=after.filter(id=>!record.before.includes(id));
   say(delta.length===1
-   ? 'RATTACHEMENT APPLE CONFIRMÉ\\nUUID inchangé : '+data.user.id+'\\nNouvelle identité Apple : +1\\nTotal identités Apple : '+after.length+'\\nÀ confirmer dans Supabase avant tout autre test.'
-   : 'RATTACHEMENT NON CONFIRMÉ\\nUUID : '+data.user.id+'\\nNouvelles identités Apple : '+delta.length+'\\nSTOP : ne pas poursuivre avant analyse.');
+   ? 'RATTACHEMENT APPLE CONFIRMÉ\nUUID inchangé : '+data.user.id+'\nNouvelle identité Apple : +1\nTotal identités Apple : '+after.length+'\nÀ confirmer dans Supabase avant tout autre test.'
+   : 'RATTACHEMENT NON CONFIRMÉ\nUUID : '+data.user.id+'\nNouvelles identités Apple : '+delta.length+'\nSTOP : ne pas poursuivre avant analyse.');
   return;
  }
  if(data?.user){display(data.user);}
@@ -106,7 +106,7 @@ document.getElementById('linkApple').onclick=async()=>{
  const {data:current,error:identitiesError}=await client.auth.getUserIdentities();
  if(identitiesError||!current){say('STOP : précontrôle des identités impossible.');return;}
  const before=current.identities.filter(i=>i.provider==='apple').map(i=>i.id);
- if(!window.confirm('TEST SUR LE NOUVEAU SUPABASE UNIQUEMENT.\\nCompte cible : '+expected+'\\nIdentités Apple existantes : '+before.length+'\\nUn rattachement réussi MODIFIERA les identités du compte cible. Continuer ?'))return;
+ if(!window.confirm('TEST SUR LE NOUVEAU SUPABASE UNIQUEMENT.\nCompte cible : '+expected+'\nIdentités Apple existantes : '+before.length+'\nUn rattachement réussi MODIFIERA les identités du compte cible. Continuer ?'))return;
  sessionStorage.setItem('gcount-apple-link-pending',JSON.stringify({uuid:expected,before}));
  const {error:linkError}=await client.auth.linkIdentity({provider:'apple',options:{redirectTo:location.origin+location.pathname}});
  if(linkError){sessionStorage.removeItem('gcount-apple-link-pending');say('Association impossible : '+linkError.message);}

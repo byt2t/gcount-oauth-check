@@ -25,7 +25,8 @@ button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padd
     <button id="recoverySend" type="submit">Recevoir mon lien sécurisé</button>
   </form>
   <pre id="recoveryStatus" role="status" aria-live="polite">Prêt pour le test.</pre>
-  <p><small>Test réservé aux membres accompagnés. Aucun mot de passe nécessaire. Ne lance pas de connexion Apple avant validation par l’administrateur.</small></p>
+  <button id="recoveryApple" type="button" hidden>Associer mon compte Apple</button>
+  <p><small>Test encadré : tu conserves ton compte et tes pintes. Aucun mot de passe, aucune clé technique à saisir.</small></p>
 </section>
 <h1>G Count · OAuth check</h1>
 <p>Test temporaire indépendant de Lovable, connecté uniquement à <strong>gcount-prod</strong>. Vérifier que les nouvelles inscriptions sont désactivées sur ce projet avant tout essai.</p>
@@ -59,36 +60,102 @@ if(recoveryMode){
  document.getElementById('recoveryPanel').hidden=false;
 }
 async function bootRecovery(){
- const sayRecovery=(text)=>{document.getElementById('recoveryStatus').textContent=text;};
+ const statusEl=document.getElementById('recoveryStatus');
+ const send=document.getElementById('recoverySend');
+ const appleButton=document.getElementById('recoveryApple');
+ const form=document.getElementById('recoveryForm');
+ const sayRecovery=message=>{statusEl.textContent=message;};
  const pilot=createClient(url,pilotKey,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:localStorage,storageKey:'gcount-recovery-pilot-session'}});
- const marker=localStorage.getItem(pilotMarker);
- if(marker){
-  let info;try{info=JSON.parse(marker);}catch{localStorage.removeItem(pilotMarker);sayRecovery('Erreur de vérification. Contacte l’administrateur.');return;}
-  if(Date.now()-info.when>60*60*1000){localStorage.removeItem(pilotMarker);sayRecovery('Ce test a expiré. Demande de l’aide à l’administrateur.');return;}
-  const {data,error}=await pilot.auth.getUser();
-  if(error||!data?.user){sayRecovery('Lien non validé ou session introuvable. STOP. Préviens l’administrateur.');return;}
-  if((data.user.email||'').toLowerCase()!==info.email){sayRecovery('Compte différent : vérification interrompue. STOP.');return;}
+ const params=new URLSearchParams(location.search);
+ const failure=params.get('error_description')||params.get('error');
+ const pendingRaw=localStorage.getItem(pilotMarker);
+ if(failure){
   localStorage.removeItem(pilotMarker);
-  document.getElementById('recoveryForm').hidden=true;
-  sayRecovery('ACCÈS CONFIRMÉ SUR SUPABASE.\\nLa session email existe. Attends la validation de ton ancien compte par l’administrateur avant de reconnecter Apple.');
+  form.hidden=true;appleButton.hidden=true;
+  sayRecovery('Connexion non terminée. Aucun rattachement confirmé.\n'+failure+'\nPréviens l’administrateur.');
   return;
  }
- document.getElementById('recoveryForm').onsubmit=async(e)=>{
-  e.preventDefault();
+ if(pendingRaw){
+  let state;try{state=JSON.parse(pendingRaw);}catch{localStorage.removeItem(pilotMarker);sayRecovery('État de connexion invalide. Préviens l’administrateur.');return;}
+  if(!state.step||!state.email||!state.when||Date.now()-state.when>60*60*1000){
+   localStorage.removeItem(pilotMarker);form.hidden=true;sayRecovery('Lien expiré ou invalide. Préviens l’administrateur.');return;
+  }
+  form.hidden=true;
+  const {data,error}=await pilot.auth.getUser();
+  const user=data?.user;
+  if(error||!user){
+   localStorage.removeItem(pilotMarker);sayRecovery('Session introuvable après connexion. Aucun compte modifié. Préviens l’administrateur.');return;
+  }
+  if((user.email||'').toLowerCase()!==state.email){
+   localStorage.removeItem(pilotMarker);sayRecovery('Adresse inattendue. STOP : aucun rattachement.');return;
+  }
+  const {data:identities,error:idError}=await pilot.auth.getUserIdentities();
+  if(idError||!identities?.identities){
+   localStorage.removeItem(pilotMarker);sayRecovery('Impossible de vérifier les identités du compte. STOP.');return;
+  }
+  const oldAndNewApple=identities.identities.filter(x=>x.provider==='apple').map(x=>x.id);
+  if(state.step==='email'){
+   if(oldAndNewApple.length!==1){
+    localStorage.removeItem(pilotMarker);
+    sayRecovery('Vérification du compte Apple historique non conforme. STOP, contacte l’administrateur.');
+    return;
+   }
+   appleButton.hidden=false;appleButton.disabled=false;
+   sayRecovery('Compte existant retrouvé. Ton identité Apple historique est conservée.\nÉtape finale : associe le même compte Apple que tu utilises actuellement sur G Count.');
+   appleButton.onclick=async()=>{
+    if(!window.confirm('Associer ton identifiant Apple habituel à ce compte G Count existant ?'))return;
+    appleButton.disabled=true;
+    const next={step:'apple',email:state.email,uuid:user.id,before:oldAndNewApple,when:Date.now()};
+    localStorage.setItem(pilotMarker,JSON.stringify(next));
+    const {error:linkError}=await pilot.auth.linkIdentity({provider:'apple',options:{redirectTo:location.origin+location.pathname}});
+    if(linkError){
+     localStorage.removeItem(pilotMarker);appleButton.hidden=true;
+     sayRecovery('Rattachement Apple impossible : '+linkError.message+'\nAucun succès confirmé. Préviens l’administrateur.');
+    }
+   };
+   return;
+  }
+  if(state.step==='apple'){
+   appleButton.hidden=true;
+   if(user.id!==state.uuid){
+    localStorage.removeItem(pilotMarker);sayRecovery('Identifiant de compte modifié. STOP : aucun succès confirmé.');return;
+   }
+   const added=oldAndNewApple.filter(id=>!state.before.includes(id));
+   localStorage.removeItem(pilotMarker);
+   if(state.before.length===1&&oldAndNewApple.length===2&&added.length===1){
+    sayRecovery('ACCÈS APPLE RÉTABLI.\nTon compte G Count historique est conservé. Aucun nouveau compte créé pendant ce parcours.\nTu pourras te connecter avec Apple sur la nouvelle version après la migration.');
+   }else{
+    sayRecovery('Rattachement non confirmé. Ne recommence pas et préviens l’administrateur.');
+   }
+   return;
+  }
+  localStorage.removeItem(pilotMarker);sayRecovery('Étape inconnue. STOP.');
+  return;
+ }
+ form.onsubmit=async(event)=>{
+  event.preventDefault();
   const input=document.getElementById('recoveryEmail');
+  if(!input.checkValidity())return;
   const email=input.value.trim().toLowerCase();
-  if(!input.checkValidity()||!email){sayRecovery('Saisis une adresse email valide.');return;}
-  if(!window.confirm('Envoyer un seul lien sécurisé à '+email+' ?\\nAucun nouveau compte ne sera créé.'))return;
-  const send=document.getElementById('recoverySend');
+  if(!email){sayRecovery('Adresse email requise.');return;}
+  if(!window.confirm('Envoyer le lien au compte G Count associé à '+email+' ?'))return;
   send.disabled=true;
-  sayRecovery('Demande de lien en cours…');
-  const {error}=await pilot.auth.signInWithOtp({email,options:{shouldCreateUser:false,emailRedirectTo:location.origin+location.pathname}});
-  if(error){sayRecovery('Lien non envoyé : '+error.message+'\\nPréviens l’administrateur et n’essaie pas une autre adresse.');return;}
-  localStorage.setItem(pilotMarker,JSON.stringify({email,when:Date.now()}));
-  document.getElementById('recoveryForm').hidden=true;
-  sayRecovery('Demande acceptée. Vérifie ta boîte mail et les indésirables.\\nOuvre le lien dans le MÊME navigateur, sur le MÊME appareil.\\nSi aucun message n’arrive, préviens l’administrateur.');
+  sayRecovery('Préparation du lien sécurisé...');
+  const {error:signOutError}=await pilot.auth.signOut({scope:'local'});
+  if(signOutError){send.disabled=false;sayRecovery('Impossible de fermer une précédente session. STOP.');return;}
+  const {error:sendError}=await pilot.auth.signInWithOtp({
+    email,
+    options:{shouldCreateUser:false,emailRedirectTo:location.origin+location.pathname}
+  });
+  if(sendError){
+   sayRecovery('Demande refusée : '+sendError.message+'\nAucun nouveau compte créé. Préviens l’administrateur.');
+   return;
+  }
+  localStorage.setItem(pilotMarker,JSON.stringify({step:'email',email,when:Date.now()}));
+  form.hidden=true;
+  sayRecovery('Demande acceptée.\nVérifie tes emails (et les indésirables) puis ouvre le lien sur CE téléphone, dans le MÊME navigateur.\nTu reviendras automatiquement ici pour associer Apple.');
  };
- sayRecovery('Prêt pour le test. Utilise uniquement l’adresse déjà associée à ton compte.');
+ sayRecovery('Indique l’adresse email déjà enregistrée dans G Count pour récupérer ton accès.');
 }
 if(recoveryMode)bootRecovery().catch(()=>{document.getElementById('recoveryStatus').textContent='Une erreur est survenue. Préviens l’administrateur.';});
 const status=document.getElementById('status');

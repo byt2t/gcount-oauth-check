@@ -22,6 +22,11 @@ button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padd
 <p><small>Ne jamais renseigner de clé secrète ou service_role. Seule une clé publique est acceptée. Les sessions restent dans cet onglet (sessionStorage).</small></p>
 <button id="google" disabled>Google</button><button id="apple" disabled>Apple</button><button id="inspect" disabled>Vérifier UUID</button><button id="logout" disabled>Déconnexion</button>
 <hr style="border:0;border-top:1px solid #75603d;margin:22px 0">
+<p><strong>Test de récupération par email — compte personnel</strong></p>
+<p>Connecte-toi d’abord avec Apple ou Google. Le test enverra un lien uniquement à l’email de <strong>ton compte connecté</strong>, puis fermera la session de test. Aucune inscription possible.</p>
+<button id="emailTest" disabled>Envoyer un lien à mon email</button>
+<p><small>Ouvre l'email avec le même navigateur et le même onglet si possible (PKCE). Un envoi accepté n’est pas une preuve de réception.</small></p>
+<hr style="border:0;border-top:1px solid #75603d;margin:22px 0">
 <p><strong>Test encadré : associer Apple à un compte existant</strong></p>
 <p>Connecte-toi d’abord par Google avec le compte cible. Recopie son UUID existant pour confirmer l’identité avant toute association.</p>
 <label for="expected">UUID du compte à conserver</label>
@@ -36,7 +41,7 @@ const url='https://aewatvipmggdymyjhwkx.supabase.co';
 const status=document.getElementById('status');
 const say=(message)=>{status.textContent=message;};
 let client;
-const actions=['google','apple','inspect','logout','linkApple'];
+const actions=['google','apple','inspect','logout','linkApple','emailTest'];
 async function initialize(key){
  if(!key || (!key.startsWith('sb_publishable_')&&!key.startsWith('eyJ'))){say('Clé publique Supabase invalide.');return;}
  client=createClient(url,key,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:sessionStorage,storageKey:'gcount-temporary-oauth-check'}});
@@ -48,11 +53,23 @@ async function initialize(key){
  if(callbackError){
   const desc=query.get('error_description')||hash.get('error_description')||'Échec du retour OAuth.';
   sessionStorage.removeItem('gcount-apple-link-pending');
-  say('ÉCHEC OAuth Apple : '+callbackError+'\n'+desc+'\nAucun succès de rattachement confirmé. STOP.');
+  sessionStorage.removeItem('gcount-email-test-pending');
+  say('ÉCHEC Auth : '+callbackError+'\n'+desc+'\nAucun succès de rattachement confirmé. STOP.');
   history.replaceState(null,'',location.pathname);
   return;
  }
  const {data,error}=await client.auth.getUser();
+ const emailPending=sessionStorage.getItem('gcount-email-test-pending');
+ if(emailPending){
+  sessionStorage.removeItem('gcount-email-test-pending');
+  history.replaceState(null,'',location.pathname);
+  let record;
+  try{record=JSON.parse(emailPending);}catch{say('STOP : état du test email invalide.');return;}
+  if(error||!data?.user){say('STOP : aucune session vérifiable après le lien email.\\n'+(error?.message||'Réessaie uniquement après analyse.'));return;}
+  if(data.user.id!==record.uuid){say('STOP : UUID différent après login email.\\nAttendu : '+record.uuid+'\\nObtenu : '+data.user.id+'\\nNe pas poursuivre.');return;}
+  say('RETOUR EMAIL VALIDÉ SUR LE COMPTE INITIAL\\nUUID Auth inchangé : '+data.user.id+'\\nLa méthode email reste à confirmer dans les logs Supabase avant conclusion.');
+  return;
+ }
  const pending=sessionStorage.getItem('gcount-apple-link-pending');
  if(pending){
   sessionStorage.removeItem('gcount-apple-link-pending');
@@ -94,6 +111,24 @@ for(const provider of ['google','apple']){
 document.getElementById('inspect').onclick=async()=>{
  const {data,error}=await client.auth.getUser();
  if(data?.user)display(data.user);else say(error?.message||'Pas de session.');
+};
+document.getElementById('emailTest').onclick=async()=>{
+ if(!client)return;
+ const {data,error}=await client.auth.getUser();
+ if(error||!data?.user?.id||!data.user.email){say('STOP : connecte-toi d’abord sur TON compte via Apple ou Google.');return;}
+ const user=data.user;
+ if(!window.confirm('Envoyer un lien de test UNIQUEMENT à : '+user.email+' ?\\nUUID actuel : '+user.id+'\\nAprès envoi, ce site fermera la session pour tester une véritable reconnexion par email.'))return;
+ const button=document.getElementById('emailTest');
+ button.disabled=true;
+ const {error:otpError}=await client.auth.signInWithOtp({
+  email:user.email,
+  options:{shouldCreateUser:false,emailRedirectTo:location.origin+location.pathname}
+ });
+ if(otpError){say('ENVOI EMAIL REFUSÉ : '+otpError.message+'\\nAucun résultat positif confirmé.');button.disabled=false;return;}
+ sessionStorage.setItem('gcount-email-test-pending',JSON.stringify({uuid:user.id}));
+ const {error:logoutError}=await client.auth.signOut();
+ if(logoutError){say('STOP : demande email acceptée, mais déconnexion échouée : '+logoutError.message+'\\nNe pas ouvrir le lien avant clarification.');return;}
+ say('Demande email acceptée par Supabase pour '+user.email+'.\\nSession locale fermée. Vérifie les courriers indésirables.\\nOuvre le lien reçu depuis ce même navigateur/onglet si possible.\\nAttends la vérification UUID au retour ; ne clique pas plusieurs fois.');
 };
 document.getElementById('linkApple').onclick=async()=>{
  if(!client)return;

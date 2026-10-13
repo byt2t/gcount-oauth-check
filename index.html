@@ -26,7 +26,7 @@ button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padd
 <p>Connecte-toi d’abord par Google avec le compte cible. Recopie son UUID existant pour confirmer l’identité avant toute association.</p>
 <label for="expected">UUID du compte à conserver</label>
 <input id="expected" type="text" autocomplete="off" spellcheck="false" placeholder="UUID Supabase existant">
-<button id="linkApple" disabled title="Suspended until safe identity migration strategy is validated">Rattachement Apple suspendu</button>
+<button id="linkApple" disabled>Associer Apple au compte vérifié</button>
 <pre id="status" role="status">En attente.</pre>
 <p><small>Le seul critère de succès est la reconnexion au même UUID Auth préexistant. Un UUID différent nécessite d'arrêter le test.</small></p>
 </main>
@@ -36,13 +36,39 @@ const url='https://aewatvipmggdymyjhwkx.supabase.co';
 const status=document.getElementById('status');
 const say=(message)=>{status.textContent=message;};
 let client;
-const actions=['google','apple','inspect','logout'];
+const actions=['google','apple','inspect','logout','linkApple'];
 async function initialize(key){
  if(!key || (!key.startsWith('sb_publishable_')&&!key.startsWith('eyJ'))){say('Clé publique Supabase invalide.');return;}
  client=createClient(url,key,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:sessionStorage,storageKey:'gcount-temporary-oauth-check'}});
  actions.forEach(id=>document.getElementById(id).disabled=false);
  say('Prêt. Sélectionne Google ou Apple pour tester.');
+ const query=new URLSearchParams(location.search);
+ const hash=new URLSearchParams(location.hash.replace(/^#/,''));
+ const callbackError=query.get('error_code')||query.get('error')||hash.get('error_code')||hash.get('error');
+ if(callbackError){
+  const desc=query.get('error_description')||hash.get('error_description')||'Échec du retour OAuth.';
+  sessionStorage.removeItem('gcount-apple-link-pending');
+  say('ÉCHEC OAuth Apple : '+callbackError+'\\n'+desc+'\\nAucun succès de rattachement confirmé. STOP.');
+  history.replaceState(null,'',location.pathname);
+  return;
+ }
  const {data,error}=await client.auth.getUser();
+ const pending=sessionStorage.getItem('gcount-apple-link-pending');
+ if(pending){
+  sessionStorage.removeItem('gcount-apple-link-pending');
+  history.replaceState(null,'',location.pathname);
+  if(error||!data?.user){say('STOP : retour Apple sans session cible vérifiable.');return;}
+  const record=JSON.parse(pending);
+  if(data.user.id!==record.uuid){say('STOP : identifiant changé après OAuth. Aucun succès validé.');return;}
+  const {data:ids,error:idsError}=await client.auth.getUserIdentities();
+  if(idsError||!ids){say('STOP : impossible de vérifier les identités Apple.');return;}
+  const after=ids.identities.filter(i=>i.provider==='apple').map(i=>i.id);
+  const delta=after.filter(id=>!record.before.includes(id));
+  say(delta.length===1
+   ? 'RATTACHEMENT APPLE CONFIRMÉ\\nUUID inchangé : '+data.user.id+'\\nNouvelle identité Apple : +1\\nTotal identités Apple : '+after.length+'\\nÀ confirmer dans Supabase avant tout autre test.'
+   : 'RATTACHEMENT NON CONFIRMÉ\\nUUID : '+data.user.id+'\\nNouvelles identités Apple : '+delta.length+'\\nSTOP : ne pas poursuivre avant analyse.');
+  return;
+ }
  if(data?.user){display(data.user);}
  else if(error && location.search){say('Retour OAuth : '+error.message);}
 }
@@ -70,7 +96,6 @@ document.getElementById('inspect').onclick=async()=>{
  if(data?.user)display(data.user);else say(error?.message||'Pas de session.');
 };
 document.getElementById('linkApple').onclick=async()=>{
- say('Rattachement Apple suspendu. Aucun compte ne doit être modifié avant validation de la procédure.');return;
  if(!client)return;
  const expected=document.getElementById('expected').value.trim().toLowerCase();
  if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(expected)){say('STOP : saisir un UUID valide du compte cible.');return;}
@@ -78,9 +103,13 @@ document.getElementById('linkApple').onclick=async()=>{
  if(error||!data.user){say('STOP : connecte-toi par Google au compte cible avant de tenter l’association.');return;}
  if(data.user.id.toLowerCase()!==expected){say('STOP : UUID connecté '+data.user.id+' différent du compte cible '+expected+'. Aucune association lancée.');return;}
  if(!(data.user.app_metadata?.providers||[]).includes('google')){say('STOP : ce compte ne possède pas de connexion Google vérifiée.');return;}
- if(!window.confirm('Associer une nouvelle identité Apple à ce compte Supabase existant ('+expected+') ? Cette action MODIFIE les identités Auth du projet cible.'))return;
+ const {data:current,error:identitiesError}=await client.auth.getUserIdentities();
+ if(identitiesError||!current){say('STOP : précontrôle des identités impossible.');return;}
+ const before=current.identities.filter(i=>i.provider==='apple').map(i=>i.id);
+ if(!window.confirm('TEST SUR LE NOUVEAU SUPABASE UNIQUEMENT.\\nCompte cible : '+expected+'\\nIdentités Apple existantes : '+before.length+'\\nUn rattachement réussi MODIFIERA les identités du compte cible. Continuer ?'))return;
+ sessionStorage.setItem('gcount-apple-link-pending',JSON.stringify({uuid:expected,before}));
  const {error:linkError}=await client.auth.linkIdentity({provider:'apple',options:{redirectTo:location.origin+location.pathname}});
- if(linkError)say('Association impossible : '+linkError.message);
+ if(linkError){sessionStorage.removeItem('gcount-apple-link-pending');say('Association impossible : '+linkError.message);}
 };
 document.getElementById('logout').onclick=async()=>{
  if(!client)return;

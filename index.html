@@ -26,7 +26,7 @@ button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padd
 <p>Connecte-toi d’abord par Google avec le compte cible. Recopie son UUID existant pour confirmer l’identité avant toute association.</p>
 <label for="expected">UUID du compte à conserver</label>
 <input id="expected" type="text" autocomplete="off" spellcheck="false" placeholder="UUID Supabase existant">
-<button id="linkApple" disabled>Associer Apple à CE compte</button>
+<button id="linkApple" disabled title="Suspended until safe identity migration strategy is validated">Rattachement Apple suspendu</button>
 <pre id="status" role="status">En attente.</pre>
 <p><small>Le seul critère de succès est la reconnexion au même UUID Auth préexistant. Un UUID différent nécessite d'arrêter le test.</small></p>
 </main>
@@ -36,7 +36,7 @@ const url='https://aewatvipmggdymyjhwkx.supabase.co';
 const status=document.getElementById('status');
 const say=(message)=>{status.textContent=message;};
 let client;
-const actions=['google','apple','inspect','logout','linkApple'];
+const actions=['google','apple','inspect','logout'];
 async function initialize(key){
  if(!key || (!key.startsWith('sb_publishable_')&&!key.startsWith('eyJ'))){say('Clé publique Supabase invalide.');return;}
  client=createClient(url,key,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:sessionStorage,storageKey:'gcount-temporary-oauth-check'}});
@@ -70,6 +70,7 @@ document.getElementById('inspect').onclick=async()=>{
  if(data?.user)display(data.user);else say(error?.message||'Pas de session.');
 };
 document.getElementById('linkApple').onclick=async()=>{
+ say('Rattachement Apple suspendu. Aucun compte ne doit être modifié avant validation de la procédure.');return;
  if(!client)return;
  const expected=document.getElementById('expected').value.trim().toLowerCase();
  if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(expected)){say('STOP : saisir un UUID valide du compte cible.');return;}

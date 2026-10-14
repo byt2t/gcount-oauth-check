@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://esm.sh; connect-src https://aewatvipmggdymyjhwkx.supabase.co https://esm.sh; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex,nofollow">
+<title>G Count · Retrouver mon accès</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#14120f;color:#eee9df}
+body{margin:0;padding:24px}main{max-width:540px;margin:6vh auto;border:1px solid #75603d;border-radius:20px;background:#201d19;padding:25px}
+h1{color:#dbb96c;font-size:24px}p{line-height:1.5;color:#c7c0b5}[hidden]{display:none!important}label{display:block}
+input{width:100%;box-sizing:border-box;margin:8px 0 14px;padding:12px;background:#15130f;border:1px solid #5d5343;color:white;border-radius:10px}
+button{border:0;border-radius:10px;padding:12px;background:#d6b468;color:#17130e;font-weight:700;margin:5px;cursor:pointer}
+button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:15px;border-radius:12px;background:#15130f}
+</style>
+</head>
+<body><main>
+<section id="recoveryPanel">
+  <p style="letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:#d6b468;font-weight:700">G COUNT · ACCÈS TEMPORAIRE</p>
+  <h1>Retrouve ta place au comptoir.</h1>
+  <p>On vérifie ton accès au compte existant, sans créer de nouveau profil.</p>
+  <form id="recoveryForm">
+    <label for="recoveryEmail">L’adresse email associée à ton compte G Count</label>
+    <input id="recoveryEmail" type="email" autocomplete="email" required maxlength="254" placeholder="tonadresse@exemple.fr">
+    <button id="recoverySend" type="submit">Recevoir mon lien sécurisé</button>
+  </form>
+  <pre id="recoveryStatus" role="status" aria-live="polite">Prêt pour le test.</pre>
+  <button id="recoveryApple" type="button" hidden>Associer mon compte Apple</button>
+  <p><small>Test encadré : tu conserves ton compte et tes pintes. Aucun mot de passe, aucune clé technique à saisir.</small></p>
+</section>
+</main>
+<script type="module">
+import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.105.4';
+const url='https://aewatvipmggdymyjhwkx.supabase.co';
+const pilotKey='sb_publishable_ycmvyUJ4Bd2I0bDKNnQOEw_aBesbiE6';
+const pilotMarker='gcount-recovery-pilot-pending';
+const root='https://byt2t.github.io/gcount-oauth-check/';
+async function bootRecovery(){
+ const statusEl=document.getElementById('recoveryStatus');
+ const send=document.getElementById('recoverySend');
+ const appleButton=document.getElementById('recoveryApple');
+ const form=document.getElementById('recoveryForm');
+ const sayRecovery=message=>{statusEl.textContent=message;};
+ const pilot=createClient(url,pilotKey,{auth:{flowType:'pkce',detectSessionInUrl:true,persistSession:true,storage:localStorage,storageKey:'gcount-recovery-pilot-session'}});
+ const params=new URLSearchParams(location.search);
+ const failure=params.get('error_description')||params.get('error');
+ const pendingRaw=localStorage.getItem(pilotMarker);
+ if(failure){
+  localStorage.removeItem(pilotMarker);
+  form.hidden=true;appleButton.hidden=true;
+  sayRecovery('Connexion non terminée. Aucun rattachement confirmé.\n'+failure+'\nPréviens l’administrateur.');
+  return;
+ }
+ if(pendingRaw){
+  let state;try{state=JSON.parse(pendingRaw);}catch{localStorage.removeItem(pilotMarker);sayRecovery('État de connexion invalide. Préviens l’administrateur.');return;}
+  if(!state.step||!state.email||!state.when||Date.now()-state.when>60*60*1000){
+   localStorage.removeItem(pilotMarker);form.hidden=true;sayRecovery('Lien expiré ou invalide. Préviens l’administrateur.');return;
+  }
+  form.hidden=true;
+  const {data,error}=await pilot.auth.getUser();
+  const user=data?.user;
+  if(error||!user){
+   localStorage.removeItem(pilotMarker);sayRecovery('Session introuvable après connexion. Aucun compte modifié. Préviens l’administrateur.');return;
+  }
+  if((user.email||'').toLowerCase()!==state.email){
+   localStorage.removeItem(pilotMarker);sayRecovery('Adresse inattendue. STOP : aucun rattachement.');return;
+  }
+  const {data:identities,error:idError}=await pilot.auth.getUserIdentities();
+  if(idError||!identities?.identities){
+   localStorage.removeItem(pilotMarker);sayRecovery('Impossible de vérifier les identités du compte. STOP.');return;
+  }
+  const oldAndNewApple=identities.identities.filter(x=>x.provider==='apple').map(x=>x.id);
+  if(state.step==='email'){
+   if(oldAndNewApple.length!==1){
+    localStorage.removeItem(pilotMarker);
+    sayRecovery('Vérification du compte Apple historique non conforme. STOP, contacte l’administrateur.');
+    return;
+   }
+   appleButton.hidden=false;appleButton.disabled=false;
+   sayRecovery('Compte existant retrouvé. Ton identité Apple historique est conservée.\nÉtape finale : associe le même compte Apple que tu utilises actuellement sur G Count.');
+   appleButton.onclick=async()=>{
+    if(!window.confirm('Associer ton identifiant Apple habituel à ce compte G Count existant ?'))return;
+    appleButton.disabled=true;
+    const next={step:'apple',email:state.email,uuid:user.id,before:oldAndNewApple,when:Date.now()};
+    localStorage.setItem(pilotMarker,JSON.stringify(next));
+    const {error:linkError}=await pilot.auth.linkIdentity({provider:'apple',options:{redirectTo:root}});
+    if(linkError){
+     localStorage.removeItem(pilotMarker);appleButton.hidden=true;
+     sayRecovery('Rattachement Apple impossible : '+linkError.message+'\nAucun succès confirmé. Préviens l’administrateur.');
+    }
+   };
+   return;
+  }
+  if(state.step==='apple'){
+   appleButton.hidden=true;
+   if(user.id!==state.uuid){
+    localStorage.removeItem(pilotMarker);sayRecovery('Identifiant de compte modifié. STOP : aucun succès confirmé.');return;
+   }
+   const added=oldAndNewApple.filter(id=>!state.before.includes(id));
+   localStorage.removeItem(pilotMarker);
+   if(state.before.length===1&&oldAndNewApple.length===2&&added.length===1){
+    sayRecovery('ACCÈS APPLE RÉTABLI.\nTon compte G Count historique est conservé. Aucun nouveau compte créé pendant ce parcours.\nTu pourras te connecter avec Apple sur la nouvelle version après la migration.');
+   }else{
+    sayRecovery('Rattachement non confirmé. Ne recommence pas et préviens l’administrateur.');
+   }
+   return;
+  }
+  localStorage.removeItem(pilotMarker);sayRecovery('Étape inconnue. STOP.');
+  return;
+ }
+ form.onsubmit=async(event)=>{
+  event.preventDefault();
+  const input=document.getElementById('recoveryEmail');
+  if(!input.checkValidity())return;
+  const email=input.value.trim().toLowerCase();
+  if(!email){sayRecovery('Adresse email requise.');return;}
+  if(!window.confirm('Envoyer le lien au compte G Count associé à '+email+' ?'))return;
+  send.disabled=true;
+  sayRecovery('Préparation du lien sécurisé...');
+  const {error:signOutError}=await pilot.auth.signOut({scope:'local'});
+  if(signOutError){send.disabled=false;sayRecovery('Impossible de fermer une précédente session. STOP.');return;}
+  const {error:sendError}=await pilot.auth.signInWithOtp({
+    email,
+    options:{shouldCreateUser:false,emailRedirectTo:root}
+  });
+  if(sendError){
+   sayRecovery('Demande refusée : '+sendError.message+'\nAucun nouveau compte créé. Préviens l’administrateur.');
+   return;
+  }
+  localStorage.setItem(pilotMarker,JSON.stringify({step:'email',email,when:Date.now()}));
+  form.hidden=true;
+  sayRecovery('Demande acceptée.\nVérifie tes emails (et les indésirables) puis ouvre le lien sur CE téléphone, dans le MÊME navigateur.\nTu reviendras automatiquement ici pour associer Apple.');
+ };
+ sayRecovery('Indique l’adresse email déjà enregistrée dans G Count pour récupérer ton accès.');
+}
+
+bootRecovery().catch(()=>{document.getElementById('recoveryStatus').textContent='Une erreur est survenue. Préviens l’administrateur.';});
+</script>
+</body></html>
